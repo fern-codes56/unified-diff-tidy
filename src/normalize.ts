@@ -14,13 +14,46 @@ export interface Hunk {
   lines: string[];
 }
 
+export interface GitFileHeader {
+  /** The "a/..." path exactly as written after `diff --git`. */
+  oldPath: string;
+  /** The "b/..." path exactly as written after `diff --git`. */
+  newPath: string;
+  /** `index`/mode-change lines that followed, preserved verbatim. */
+  extendedLines: string[];
+}
+
 export interface FileDiff {
   oldPath: string;
   newPath: string;
   hunks: Hunk[];
+  /** Present when the entry began with a `diff --git` line. */
+  gitHeader?: GitFileHeader;
+  /**
+   * False for entries with no `---`/`+++` pair at all: a pure file-mode
+   * change carries only a `diff --git` line and mode lines. Defaults to
+   * true, so plain (non-git) diffs don't need to set it.
+   */
+  hasPathHeaders?: boolean;
 }
 
 const HUNK_HEADER = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/;
+const GIT_DIFF_HEADER = /^diff --git (\S+) (\S+)$/;
+const OLD_MODE = /^old mode \d+$/;
+const NEW_MODE = /^new mode \d+$/;
+const NEW_FILE_MODE = /^new file mode \d+$/;
+const DELETED_FILE_MODE = /^deleted file mode \d+$/;
+const INDEX_LINE = /^index [0-9a-fA-F]+\.\.[0-9a-fA-F]+(?: \d+)?$/;
+
+function isExtendedHeaderLine(line: string): boolean {
+  return (
+    OLD_MODE.test(line) ||
+    NEW_MODE.test(line) ||
+    NEW_FILE_MODE.test(line) ||
+    DELETED_FILE_MODE.test(line) ||
+    INDEX_LINE.test(line)
+  );
+}
 
 function stripLineEndings(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
@@ -53,6 +86,34 @@ export function parseDiff(text: string): FileDiff[] {
       i++;
       continue;
     }
+
+    let gitHeader: GitFileHeader | undefined;
+    if (lines[i].startsWith("diff --git ")) {
+      const match = GIT_DIFF_HEADER.exec(lines[i]);
+      if (!match) {
+        throw new DiffFormatError(`malformed diff --git header: ${lines[i]}`);
+      }
+      i++;
+      const extendedLines: string[] = [];
+      while (i < lines.length && isExtendedHeaderLine(lines[i])) {
+        extendedLines.push(lines[i]);
+        i++;
+      }
+      gitHeader = { oldPath: match[1], newPath: match[2], extendedLines };
+    }
+
+    if (gitHeader && !(i < lines.length && lines[i].startsWith("--- "))) {
+      // A pure file-mode or index change: no `---`/`+++` pair, no hunks.
+      files.push({
+        oldPath: gitHeader.oldPath,
+        newPath: gitHeader.newPath,
+        hunks: [],
+        gitHeader,
+        hasPathHeaders: false,
+      });
+      continue;
+    }
+
     if (!lines[i].startsWith("--- ")) {
       throw new DiffFormatError(
         `expected a "--- " file header, found: ${JSON.stringify(lines[i])}`,
@@ -103,7 +164,7 @@ export function parseDiff(text: string): FileDiff[] {
       hunks.push({ oldStart, newStart, headerSuffix, lines: body });
     }
 
-    files.push({ oldPath, newPath, hunks });
+    files.push({ oldPath, newPath, hunks, gitHeader, hasPathHeaders: true });
   }
 
   return files;
@@ -135,8 +196,14 @@ function formatRange(start: number, count: number): string {
 export function serializeDiff(files: FileDiff[]): string {
   const out: string[] = [];
   for (const file of files) {
-    out.push(`--- ${file.oldPath}`);
-    out.push(`+++ ${file.newPath}`);
+    if (file.gitHeader) {
+      out.push(`diff --git ${file.gitHeader.oldPath} ${file.gitHeader.newPath}`);
+      out.push(...file.gitHeader.extendedLines);
+    }
+    if (file.hasPathHeaders !== false) {
+      out.push(`--- ${file.oldPath}`);
+      out.push(`+++ ${file.newPath}`);
+    }
     for (const hunk of file.hunks) {
       const { oldCount, newCount } = countLines(hunk.lines);
       out.push(

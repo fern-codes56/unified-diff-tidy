@@ -97,10 +97,16 @@ which reads `tsconfig.json` and writes the CLI and library to `dist/`.
 
 ## Scope right now
 
-The parser handles the common case: one or more files, each a `---`/`+++`
-path pair followed by `@@` hunks. It does not yet understand `diff --git`
-preambles, file mode lines, or rename/copy metadata — those pass through as
-unrecognized input today. See the issues for what's planned next.
+The parser handles one or more files, each optionally preceded by a
+`diff --git a/path b/path` line and its `index`/mode-change lines, followed
+by a `---`/`+++` path pair and `@@` hunks. Pure mode changes (a `diff --git`
+entry with no textual diff, such as a chmod) are also recognized. Everything
+in a recognized `diff --git` preamble is preserved verbatim and re-emitted
+as-is; only the hunk headers underneath are recomputed.
+
+It does not yet understand rename or copy metadata (`rename from`/
+`rename to`, `copy from`/`copy to`, `similarity index`) — those pass through
+as unrecognized input today. See the issues for what's planned next.
 
 ## License
 
