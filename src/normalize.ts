@@ -44,6 +44,10 @@ const NEW_MODE = /^new mode \d+$/;
 const NEW_FILE_MODE = /^new file mode \d+$/;
 const DELETED_FILE_MODE = /^deleted file mode \d+$/;
 const INDEX_LINE = /^index [0-9a-fA-F]+\.\.[0-9a-fA-F]+(?: \d+)?$/;
+const SIMILARITY_LINE = /^(?:dis)?similarity index \d+%$/;
+// Unlike the `diff --git` line, these paths are not quoted or split on
+// whitespace, so they may legitimately contain spaces.
+const RENAME_COPY_PATH = /^(?:rename|copy) (?:from|to) .+$/;
 
 function isExtendedHeaderLine(line: string): boolean {
   return (
@@ -51,7 +55,9 @@ function isExtendedHeaderLine(line: string): boolean {
     NEW_MODE.test(line) ||
     NEW_FILE_MODE.test(line) ||
     DELETED_FILE_MODE.test(line) ||
-    INDEX_LINE.test(line)
+    INDEX_LINE.test(line) ||
+    SIMILARITY_LINE.test(line) ||
+    RENAME_COPY_PATH.test(line)
   );
 }
 
